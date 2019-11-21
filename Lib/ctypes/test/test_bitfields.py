@@ -290,5 +290,30 @@ class BitFieldTest(unittest.TestCase):
         x.c = 2
         self.assertEqual(b, b'\xab\xcd\xef\x12')
 
+ 
+    @need_symbol('c_uint32')
+    def test_big_union(self):
+        class Big(BigEndianUnion):
+            _fields_ = [("a", c_uint32), ("b", c_uint32)]
+        b = bytearray(4)
+        x = Big.from_buffer(b)
+        x.a = 1
+        x.b = 0xabcdef
+        self.assertEqual(x.a, 11259375)
+        self.assertEqual(x.b, 11259375)
+        self.assertEqual(b, b'\x00\xab\xcd\xef')
+
+    @need_symbol('c_uint32')
+    def test_little_union(self):
+        class Little(LittleEndianUnion):
+            _fields_ = [("a", c_uint32), ("b", c_uint32)]
+        b = bytearray(4)
+        x = Little.from_buffer(b)
+        x.a = 1
+        x.b = 0xabcdef
+        self.assertEqual(x.a, 11259375)
+        self.assertEqual(x.b, 11259375)
+        self.assertEqual(b, b'\xef\xcd\xab\x00')
+
 if __name__ == "__main__":
     unittest.main()

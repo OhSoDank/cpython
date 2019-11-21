@@ -22,12 +22,12 @@ class Test(unittest.TestCase):
             setattr(bits, "i%s" % i, 1)
             dump(bits)
 
-    def test_slots(self):
-        class BigPoint(BigEndianStructure):
+    def assert_on_slots(self, big_endian, little_endian):
+        class BigPoint(big_endian):
             __slots__ = ()
             _fields_ = [("x", c_int), ("y", c_int)]
 
-        class LowPoint(LittleEndianStructure):
+        class LowPoint(little_endian):
             __slots__ = ()
             _fields_ = [("x", c_int), ("y", c_int)]
 
@@ -41,6 +41,12 @@ class Test(unittest.TestCase):
             big.z = 42
         with self.assertRaises(AttributeError):
             little.z = 24
+
+    def test_struct_slots(self):
+        self.assert_on_slots(BigEndianStructure, LittleEndianStructure)
+
+    def test_union_slots(self):
+        self.assert_on_slots(BigEndianUnion, LittleEndianUnion)
 
     def test_endian_short(self):
         if sys.byteorder == "little":
@@ -170,11 +176,11 @@ class Test(unittest.TestCase):
         self.assertIs(c_char.__ctype_le__, c_char)
         self.assertIs(c_char.__ctype_be__, c_char)
 
-    def test_struct_fields_1(self):
+    def assert_on_fields(self, big_endian, little_endian):
         if sys.byteorder == "little":
-            base = BigEndianStructure
+            base = big_endian
         else:
-            base = LittleEndianStructure
+            base = little_endian
 
         class T(base):
             pass
@@ -205,10 +211,14 @@ class Test(unittest.TestCase):
                 pass
             self.assertRaises(TypeError, setattr, T, "_fields_", [("x", typ)])
 
-    def test_struct_struct(self):
-        # nested structures with different byteorders
+    def test_struct_fields_1(self):
+        self.assert_on_fields(BigEndianStructure, LittleEndianStructure)
 
-        # create nested structures with given byteorders and set memory to data
+    def test_union_fields(self):
+        self.assert_on_fields(BigEndianUnion, LittleEndianUnion)
+
+    def test_nested_structures(self):
+        # Nested structures with different byteorders, setting memory to data.
 
         for nested, data in (
             (BigEndianStructure, b'\0\0\0\1\0\0\0\2'),
@@ -218,6 +228,9 @@ class Test(unittest.TestCase):
                 BigEndianStructure,
                 LittleEndianStructure,
                 Structure,
+                BigEndianUnion,
+                LittleEndianUnion,
+                Union
             ):
                 class NestedStructure(nested):
                     _fields_ = [("x", c_uint32),
@@ -233,6 +246,38 @@ class Test(unittest.TestCase):
                 self.assertEqual(s.point.x, 1)
                 self.assertEqual(s.point.y, 2)
 
+    def test_nested_unions(self):
+        # Nested unions with different byteorders, setting memory to data.
+
+        for nested, data in (
+            (BigEndianUnion, b'\0\0\0\1\0\0\0\2'),
+            (LittleEndianUnion, b'\1\0\0\0\2\0\0\0')
+        ):
+            for parent in (
+                BigEndianStructure,
+                LittleEndianStructure,
+                Structure,
+                BigEndianUnion,
+                LittleEndianUnion,
+                Union
+            ):
+                class NestedStructure(nested):
+                    _fields_ = [("x", c_uint32),
+                                ("y", c_uint32)]
+
+                class TestStructure(parent):
+                    _fields_ = [("point", NestedStructure)]
+
+                self.assertEqual(len(data), 2*sizeof(TestStructure))
+                ptr = POINTER(TestStructure)
+                s1 = cast(data, ptr)[0]
+                s2 = cast(data, ptr)[1]
+                del ctypes._pointer_type_cache[TestStructure]
+                self.assertEqual(s1.point.x, 1)
+                self.assertEqual(s1.point.y, 1)
+                self.assertEqual(s2.point.x, 2)
+                self.assertEqual(s2.point.y, 2)
+      
     def test_struct_fields_2(self):
         # standard packing in struct uses no alignment.
         # So, we have to align using pad bytes.
