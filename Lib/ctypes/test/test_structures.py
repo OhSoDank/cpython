@@ -657,59 +657,107 @@ class StructureTestCase(unittest.TestCase):
         self.assertEqual(test5.another_int, 0)
 
     def test_union_endian_same_size(self):
+        """Test setting a member of an endian union."""
         @need_symbol('c_uint32')
-        def base_union_same_size(union_type, buf):
+        def assert_on_buffer(union_type, buf):
             class EndianUnion(union_type):
                 _fields_ = [("a", c_uint32), ("b", c_uint32)]
-            b = bytearray(4)
-            x = EndianUnion.from_buffer(b)
+            byte_array = bytearray(4)
+            x = EndianUnion.from_buffer(byte_array)
             x.a = 0xabcdef
+            # Since a and b are of the same type it makes sense to compare the
+            # two values.
             self.assertEqual(x.a, x.b)
-            self.assertEqual(b, buf)
-        base_union_same_size(BigEndianUnion, b'\x00\xab\xcd\xef')
-        base_union_same_size(LittleEndianUnion, b'\xef\xcd\xab\x00')
+            # Check that the buffer has been written to correctly.
+            self.assertEqual(byte_array, buf)
+        assert_on_buffer(BigEndianUnion, b'\x00\xab\xcd\xef')
+        assert_on_buffer(LittleEndianUnion, b'\xef\xcd\xab\x00')
 
     def test_union_endian_different_size(self):
+        """
+        Test setting a member of an endian union where the members have
+        different sizes.
+        """
+        @need_symbol('c_uint16')
         @need_symbol('c_uint32')
-        @need_symbol('c_uint64')
         def assert_on_buffer(union_type, buf):
             class EndianUnion(union_type):
-                _fields_ = [("a", c_uint32), ("b", c_uint64)]
-            b = bytearray(8)
-            x = EndianUnion.from_buffer(b)
+                _fields_ = [("a", c_uint16), ("b", c_uint32)]
+            byte_array = bytearray(4)
+            x = EndianUnion.from_buffer(byte_array)
             # Note that the buffer look the same regardless of whether we
             # set a or b as they should point to the same bit of memory.
-            x.a = 0xabcdef
-            self.assertEqual(b, buf)
+            # Also note that it does not make sense to make a direct comparison
+            # between x.a and x.b as they have different types.
+            x.a = 0xabcd
+            self.assertEqual(byte_array, buf)
+            x.b = 0xabcd
+            self.assertEqual(byte_array, buf)
+        assert_on_buffer(BigEndianUnion, b'\x00\x00\xab\xcd')
+        assert_on_buffer(LittleEndianUnion, b'\xcd\xab\x00\x00')
+
+    def test_union_endian_different_size_set_larger_only(self):
+        """
+        For endian unions with different sized members, test setting the larger
+        member to a value greater than the size of the smaller member.
+        """
+        @need_symbol('c_uint16')
+        @need_symbol('c_uint32')
+        def assert_on_buffer(union_type, buf):
+            class EndianUnion(union_type):
+                _fields_ = [("a", c_uint16), ("b", c_uint32)]
+            byte_array = bytearray(4)
+            x = EndianUnion.from_buffer(byte_array)
             x.b = 0xabcdef
-            self.assertEqual(b, buf)
-        assert_on_buffer(BigEndianUnion, b'\x00\x00\x00\x00\x00\xab\xcd\xef')
-        assert_on_buffer(LittleEndianUnion, b'\xef\xcd\xab\x00\x00\x00\x00\x00')
+            self.assertEqual(byte_array, buf)
+        assert_on_buffer(BigEndianUnion, b'\x00\xab\xcd\xef')
+        assert_on_buffer(LittleEndianUnion, b'\xef\xcd\xab\x00')
 
     def test_nested_union_different_size(self):
+        """
+        Test nesting of endian unions.
+        """
+        @need_symbol('c_uint16')
         @need_symbol('c_uint32')
-        @need_symbol('c_uint64')
         def assert_on_buffer(union_type, buf):
-            class LargeInnerUnion(union_type):
-                _fields_ = [("a", c_uint32), ("b", c_uint64)]
             class SmallInnerUnion(union_type):
+                _fields_ = [("a", c_uint8), ("b", c_uint16)]
+            class LargeInnerUnion(union_type):
                 _fields_ = [("a", c_uint16), ("b", c_uint32)]
             class OuterUnion(union_type):
                 # No need to test the outer union being of different
                 # endianness to its members, so union_type is used throughout.
                 _fields_ = [
-                     ("first", SmallInnerUnion), ("second", LargeInnerUnion)
+                     ("small", SmallInnerUnion), ("large", LargeInnerUnion)
                 ]
-            b = bytearray(8)
-            x = OuterUnion.from_buffer(b)
-            x.first.a = 0xabcd
-            self.assertEqual(b, buf)
-            x.second.b = 0xabcd
-            self.assertEqual(b, buf)
+            byte_array = bytearray(4)
+            x = OuterUnion.from_buffer(byte_array)
+            # Set values of the members in ascending size order and check that
+            # the buffer is written to correctly each time.
+            x.small.a = 0xab
+            self.assertEqual(byte_array, buf[0])
+            x.small.b = 0xabcd
+            self.assertEqual(byte_array, buf[1])
+            x.large.a = 0xabcd
+            self.assertEqual(byte_array, buf[2])
+            x.large.b = 0xabcdef
+            self.assertEqual(byte_array, buf[3])
         assert_on_buffer(
-            BigEndianUnion, b'\x00\x00\x00\x00\x00\x00\xab\xcd')
+            BigEndianUnion, [
+                b'\x00\x00\x00\xab',
+                b'\x00\x00\xab\xcd',
+                b'\x00\x00\xab\xcd',
+                b'\x00\xab\xcd\xef'
+                ]
+            )
         assert_on_buffer(
-            LittleEndianUnion, b'\xcd\xab\x00\x00\x00\x00\x00\x00')
+            LittleEndianUnion, [
+                b'\xab\x00\x00\x00',
+                b'\xcd\xab\x00\x00',
+                b'\xcd\xab\x00\x00',
+                b'\xef\xcd\xab\x00'
+                ]
+            )
 
 
 class PointerMemberTestCase(unittest.TestCase):
