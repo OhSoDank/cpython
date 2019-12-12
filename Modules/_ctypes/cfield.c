@@ -42,6 +42,105 @@ PyCField_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
  * pbitofs points to the current bit offset, this will be updated.
  * prev_desc points to the type of the previous bitfield, if any.
  */
+void
+PyCUnionFieldSize_FromDesc(PyObject *desc, Py_ssize_t index,
+                           Py_ssize_t *pfield_size, int bitsize, int *pbitofs,
+                           Py_ssize_t *psize, int big_endian)
+{
+    Py_ssize_t size, align;
+    StgDictObject *dict;
+    int fieldtype;
+    Py_ssize_t offset = 0; 
+#define NO_BITFIELD 0
+#define NEW_BITFIELD 1
+#define CONT_BITFIELD 2
+#define EXPAND_BITFIELD 3
+
+    dict = PyType_stgdict(desc);
+    if (!dict) {
+        PyErr_SetString(PyExc_TypeError,
+                        "has no _stginfo_");
+        return;
+    }
+    if (bitsize /* this is a bitfield request */
+        && *pfield_size /* we have a bitfield open */
+#ifdef MS_WIN32
+        /* MSVC, GCC with -mms-bitfields */
+        && dict->size * 8 == *pfield_size
+#else
+        /* GCC */
+        && dict->size * 8 <= *pfield_size
+#endif
+        && (*pbitofs + bitsize) <= *pfield_size) {
+        /* continue bit field */
+        fieldtype = CONT_BITFIELD;
+#ifndef MS_WIN32
+    } else if (bitsize /* this is a bitfield request */
+        && *pfield_size /* we have a bitfield open */
+        && dict->size * 8 >= *pfield_size
+        && (*pbitofs + bitsize) <= dict->size * 8) {
+        /* expand bit field */
+        fieldtype = EXPAND_BITFIELD;
+#endif
+    } else if (bitsize) {
+        /* start new bitfield */
+        fieldtype = NEW_BITFIELD;
+        *pbitofs = 0;
+        *pfield_size = dict->size * 8;
+    } else {
+        /* not a bit field */
+        fieldtype = NO_BITFIELD;
+        *pbitofs = 0;
+        *pfield_size = 0;
+    }
+
+    size = dict->size;
+
+    switch (fieldtype) {
+    case NEW_BITFIELD:
+        *pbitofs = bitsize;
+        /* fall through */
+    case NO_BITFIELD:
+        align = dict->align;
+        if (align && offset % align) {
+            Py_ssize_t delta = align - (offset % align);
+            *psize += delta;
+            offset += delta;
+        }
+
+        *psize += size;
+        offset += size;
+
+        break;
+
+    case EXPAND_BITFIELD:
+        offset += dict->size - *pfield_size/8;
+        *psize += dict->size - *pfield_size/8;
+
+        *pfield_size = dict->size * 8;
+
+        *pbitofs += bitsize;
+        break;
+
+    case CONT_BITFIELD:
+        *pbitofs += bitsize;
+        break;
+    }
+    return;
+}
+
+/*
+ * Expects the size, index and offset for the current field in *psize and
+ * *poffset, stores the total size so far in *psize, the offset for the next
+ * field in *poffset, the alignment requirements for the current field in
+ * *palign, and returns a field desriptor for this field.
+ */
+/*
+ * bitfields extension:
+ * bitsize != 0: this is a bit field.
+ * pbitofs points to the current bit offset, this will be updated.
+ * prev_desc points to the type of the previous bitfield, if any.
+ */
 PyObject *
 PyCField_FromDesc(PyObject *desc, Py_ssize_t index,
                 Py_ssize_t *pfield_size, int bitsize, int *pbitofs,

@@ -123,6 +123,10 @@ extern PyTypeObject PyCSimpleType_Type;
 extern PyTypeObject PyCField_Type;
 extern struct fielddesc *_ctypes_get_fielddesc(const char *fmt);
 
+extern void
+PyCUnionFieldSize_FromDesc(PyObject *desc, Py_ssize_t index,
+                           Py_ssize_t *pfield_size, int bitsize, int *pbitofs,
+                           Py_ssize_t *psize, int is_big_endian);
 
 extern PyObject *
 PyCField_FromDesc(PyObject *desc, Py_ssize_t index,

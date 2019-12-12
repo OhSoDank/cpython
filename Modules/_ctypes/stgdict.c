@@ -495,6 +495,51 @@ PyCStructUnionType_update_stgdict(PyObject *type, PyObject *fields, int isStruct
     if (stgdict->format == NULL)
         return -1;
 
+    /*
+     * If this is a Union for which the Endianness is being changed, then 
+     * calculate the size of the largest element and store the other element
+     * sizes for later use.
+     *
+     * big_endian represents the Endianness of this structure / union. (1 for
+     * Big, 0 for Little)
+     * PY_BIG_ENDAIN represents the Endianness of the system. If they are
+     * different then we are changing the Endianness.
+     */
+    Py_ssize_t sizes[len];
+
+    if (!isStruct && (big_endian != PY_BIG_ENDIAN)) {
+        for (i = 0; i < len; i++) {
+            PyObject *name = NULL, *desc = NULL;
+            PyObject *pair = PySequence_GetItem(fields, i);
+            int bitsize = 0;
+            int parsed = 0; /* Whether the tuple was parsed successfully */
+
+            if (pair) {
+                parsed = PyArg_ParseTuple(pair,
+                                          "UO|i",
+                                          &name,
+                                          &desc,
+                                          &bitsize);
+                if (parsed) {
+                    sizes[i] = 0;
+                    /*
+                     * Need to extract the size of each Field in the Union.
+                     */
+                    PyCUnionFieldSize_FromDesc(desc, i,
+                                          &field_size, bitsize, &bitofs,
+                                          &sizes[i], big_endian);
+                    union_size = max(sizes[i], union_size);
+                }
+            }
+            if (!pair || !parsed) {
+                PyErr_SetString(PyExc_TypeError,
+                                "'_fields_' must be a sequence of "           \
+                                "(name, C type) pairs");
+                Py_XDECREF(pair);
+                return -1;
+            }
+        }
+    }
 #define realdict ((PyObject *)&stgdict->dict)
     for (i = 0; i < len; ++i) {
         PyObject *name = NULL, *desc = NULL;
@@ -608,11 +653,19 @@ PyCStructUnionType_update_stgdict(PyObject *type, PyObject *fields, int isStruct
             size = 0;
             offset = 0;
             align = 0;
+
+            if (big_endian != PY_BIG_ENDIAN) {
+                /*
+                 * Adjust the offset so that fields are lined up correctly when
+                 * the Endianness is changed.
+                 */
+                offset += union_size - sizes[i];
+            }
+
             prop = PyCField_FromDesc(desc, i,
                                    &field_size, bitsize, &bitofs,
                                    &size, &offset, &align,
                                    pack, big_endian);
-            union_size = max(size, union_size);
         }
         total_align = max(align, total_align);
 
