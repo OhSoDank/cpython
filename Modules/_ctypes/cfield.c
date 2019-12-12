@@ -50,7 +50,7 @@ PyCUnionFieldSize_FromDesc(PyObject *desc, Py_ssize_t index,
     Py_ssize_t size, align;
     StgDictObject *dict;
     int fieldtype;
-    Py_ssize_t offset = 0; 
+    Py_ssize_t offset = 0;
 #define NO_BITFIELD 0
 #define NEW_BITFIELD 1
 #define CONT_BITFIELD 2
